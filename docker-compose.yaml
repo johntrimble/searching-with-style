@@ -1,0 +1,48 @@
+version: '3.9'
+
+name: searching-with-style
+
+services:
+  jupyter:
+    build: ./services/jupyter
+
+    # I find that the shared memory is likely to run out, so I switch ipc to
+    # host. We could also increase the amount of shared memory, but this seems
+    # like the most reliable way to avoid the issue, though it is less secure.
+    ipc: host
+
+    # Run as the host's user. This avoids permissions issues.
+    # While Bash generally defines the UID environment variable, we aren't so
+    # lucky with the primary GID. Often times this just ends up being the same
+    # as the UID, so we can cheat.
+    user: "${UID:-1000}:${GID:-${UID:-1000}}"
+    # user: "1000:1000"
+    
+    restart: always
+    command: tail -f /dev/null
+    ports:
+      # - 8888:8888 # Jupyter
+      - 7860:7860 # Gradio
+    
+    # VS Code does not seem to laod this automatically?
+    env_file:
+      - .env
+    
+    # Attach the GPU to the container. Use nvidia-smi to verify the GPU
+    # actually got attached. If at any point nvidia-smi throws an error, try
+    # rebuilding the devcontainer in vs code.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities:
+              - gpu
+    volumes:
+      - .:/workspaces/searching-with-style:cached
+      - ./pretrained_models:/workspaces/searching-with-style/code/pretrained_models:cached
+      # Any models jupyter downloads for us will be cached here (like VGG19)
+      - ./cache:/home/jupyter/.cache:cached
+      # You can override these paths with environment variables, for example
+      # by setting them in the .env file
+      - ${WIKIART_DATASET_PATH:-./wikiart}:/workspaces/searching-with-style/code/wikiart:ro
+      - ${BEST_ARTWORK_PATH:-./best_artwork}:/workspaces/searching-with-style/code/best_artwork:ro

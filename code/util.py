@@ -31,6 +31,20 @@ class BestArtDataset(ImageFolder):
         return sample, filename, target
 
 
+def extract_artist_style_from_wikiart_image_path(path):
+    style_name, filename = path.split("/")
+    artist_name, *remaining = filename.split("_")
+    return artist_name, style_name, '_'.join(remaining)
+
+
+def idx_to_name_dict_to_list(idx_to_name):
+    max_idx = max(idx_to_name.keys())
+    idx_to_name_list = [None] * (max_idx + 1)
+    for idx, name in idx_to_name.items():
+        idx_to_name_list[idx] = name
+    return idx_to_name_list
+
+
 class WikiArtDataset(Dataset):
     def __init__(self, root, transform=None):
         super(WikiArtDataset, self).__init__()
@@ -41,18 +55,9 @@ class WikiArtDataset(Dataset):
         self.style_classes = [str(d.name) for d in self.root.iterdir() if d.is_dir()]
         self.style_class_to_idx = {class_name: i for i, class_name in enumerate(self.style_classes)}
 
-        # https://huggingface.co/datasets/huggan/wikiart/tree/main
-        huggingface_metadata = self.root / "dataset_infos.json"
-        with open(huggingface_metadata) as f:
-            data_infos = json.loads(f.read())
-            for feature in ['artist']:
-                classes = data_infos['huggan--wikiart']['features'][feature]['names']
-                setattr(self, f'{feature}_classes', tuple(classes))
-                setattr(self, f'{feature}_class_to_idx', {class_name: i for i, class_name in enumerate(classes)})
-        
         classes_csv = self.root / "wclasses.csv"
         self.samples = []
-
+        artist_to_idx = {'unknown-artist': 0}
         with open(classes_csv) as f:
             reader = csv.reader(f)
             # For every row in the csv file
@@ -60,7 +65,23 @@ class WikiArtDataset(Dataset):
                 # skip header
                 if i == 0:
                     continue
-                self.samples.append((filename, int(artist_idx)))
+
+                artist_idx = int(artist_idx)
+                genre_idx = int(genre_idx)
+                style_idx = int(style_idx)
+
+                artist, *_ = extract_artist_style_from_wikiart_image_path(filename)
+                if artist_idx != 0:
+                    artist_to_idx[artist] = artist_idx
+                self.samples.append((filename, artist_idx))
+        
+        artist_max_idx = max(artist_to_idx.values())
+        artist_classes = [None] * (artist_max_idx + 1)
+        for artist, idx in artist_to_idx.items():
+            artist_classes[idx] = artist
+        
+        self.artist_classes = tuple(artist_classes)
+        self.artist_class_to_idx = artist_to_idx
 
     def __getitem__(self, index):
         filename, artist_idx = self.samples[index]
@@ -184,3 +205,16 @@ def with_retries(fn, max_retries=5, interval=10, max_interval=60):
             else:
                 raise e
     return output
+
+
+def find_scb_path(scb_filename):
+    """
+    Path's are a pain because they aren't the same in the container as they
+    are on the host. This function finds the scb even when the path is wrong.
+    """
+    scb_path = original_scb_path = Path(scb_filename)
+    if not scb_path.exists():
+        scb_path = Path.cwd() / original_scb_path.name
+    if not scb_path.exists():
+        scb_path = Path.cwd().parent / original_scb_path.name
+    return str(scb_path)
